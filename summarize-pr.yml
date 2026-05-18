@@ -1,0 +1,59 @@
+name: Summarize PR
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Cache Ollama model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: /usr/share/ollama/.ollama/models
+          key: ollama-qwen3-1.7b
+
+      - name: Pull model
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          ollama serve &
+          sleep 3
+          ollama pull qwen3:1.7b
+
+      - name: Start Ollama
+        run: |
+          ollama serve &
+          sleep 3
+
+      - name: Summarize PR changes
+        run: |
+          python summarize_pr.py "${{ github.event.pull_request.html_url }}" > summary.txt
+
+      - name: Post summary as comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('summary.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## PR Summary\n\n${summary}`
+            });
